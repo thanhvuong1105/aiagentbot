@@ -1,19 +1,24 @@
 {
   "name": "ai-backtest-platform",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "directories": {
-    "doc": "docs"
-  },
+  "description": "AI Backtest Platform (NodeJS + Python)",
+  "type": "module",
+  "main": "api/server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node api/server.js",
+    "dev": "node api/server.js"
   },
-  "keywords": [],
+  "keywords": [
+    "backtest",
+    "trading",
+    "ai",
+    "pine-script",
+    "crypto"
+  ],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
-    "express": "^5.2.1"
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.5.0"
   }
 }

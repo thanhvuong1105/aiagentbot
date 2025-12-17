@@ -1,45 +1,49 @@
-// api/server.js
-const express = require("express");
-const { parsePineStrategy } = require("./agent/parsePine");
-const { spawn } = require("child_process");
+import express from "express";
+import rateLimit from "express-rate-limit";
+import { spawn } from "child_process";
+import { parsePineStrategy } from "./agent/parsePine.js";
 
 const app = express();
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
-  console.log(`API running at http://localhost:${PORT}`);
+const PORT = process.env.PORT || 3002;
+
+// ===== Middleware =====
+const limiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
+app.use(limiter);
+app.use(express.json({ limit: "200kb" }));
 
-app.use(express.json());
+app.use((req, _, next) => {
+  console.log(new Date().toISOString(), req.method, req.url);
+  next();
+});
 
-// health check
+// ===== Health check =====
 app.get("/", (req, res) => {
   res.json({
     status: "ok",
-    message: "AI Backtest Platform API is running"
+    message: "AI Backtest Platform API is running",
   });
 });
 
-// parse Pine Script
+// ===== Parse Pine =====
 app.post("/parse-pine", (req, res) => {
   const { pineCode } = req.body;
-
   if (!pineCode) {
     return res.status(400).json({ error: "pineCode is required" });
   }
 
-  const strategyJson = parsePineStrategy(pineCode);
-
-  res.json({
-    success: true,
-    strategy: strategyJson
-  });
+  const strategy = parsePineStrategy(pineCode);
+  res.json({ success: true, strategy });
 });
 
-// 🚀 RUN BACKTEST (NodeJS → Python)
+// ===== Run Backtest =====
 app.post("/run-backtest", (req, res) => {
   const { strategy } = req.body;
-
   if (!strategy) {
     return res.status(400).json({ error: "strategy is required" });
   }
@@ -49,41 +53,29 @@ app.post("/run-backtest", (req, res) => {
   let output = "";
   let errorOutput = "";
 
-  python.stdout.on("data", (data) => {
-    output += data.toString();
-  });
-
-  python.stderr.on("data", (data) => {
-    errorOutput += data.toString();
-  });
+  python.stdout.on("data", (d) => (output += d.toString()));
+  python.stderr.on("data", (d) => (errorOutput += d.toString()));
 
   python.on("close", (code) => {
     if (code !== 0) {
       return res.status(500).json({
         error: "Python backtest failed",
-        detail: errorOutput
+        detail: errorOutput,
       });
     }
 
     try {
-      const result = JSON.parse(output);
-      res.json({
-        success: true,
-        result
-      });
-    } catch (e) {
-      res.status(500).json({
-        error: "Invalid JSON from Python",
-        raw: output
-      });
+      res.json({ success: true, result: JSON.parse(output) });
+    } catch {
+      res.status(500).json({ error: "Invalid JSON from Python", raw: output });
     }
   });
 
-  // gửi strategy sang Python qua stdin
   python.stdin.write(JSON.stringify(strategy));
   python.stdin.end();
 });
 
+// ===== START SERVER (DUY NHẤT 1 LẦN) =====
 app.listen(PORT, () => {
-  console.log(`API running at http://localhost:${PORT}`);
+  console.log(`API running on port ${PORT}`);
 });

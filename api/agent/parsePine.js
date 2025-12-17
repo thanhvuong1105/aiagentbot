@@ -1,6 +1,6 @@
 // api/agent/parsePine.js
 
-function parsePineStrategy(pineCode) {
+export function parsePineStrategy(pineCode) {
   // MOCK logic – sau này AI thật sẽ thay thế
   return {
     meta: {
@@ -18,7 +18,3 @@ function parsePineStrategy(pineCode) {
     }
   };
 }
-
-module.exports = {
-  parsePineStrategy
-};
