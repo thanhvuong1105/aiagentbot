@@ -15,6 +15,35 @@ def crossed_down(prev_fast, prev_slow, fast, slow):
     return prev_fast >= prev_slow and fast < slow
 
 
+# ===== METRICS =====
+def calc_winrate(trades):
+    if not trades:
+        return 0.0
+    wins = sum(1 for t in trades if t.get("pnl", 0) > 0)
+    return round(wins / len(trades) * 100, 2)
+
+
+def calc_profit_factor(trades):
+    gross_profit = sum(t["pnl"] for t in trades if t.get("pnl", 0) > 0)
+    gross_loss = abs(sum(t["pnl"] for t in trades if t.get("pnl", 0) < 0))
+    if gross_loss == 0:
+        return round(float("inf"), 2)
+    return round(gross_profit / gross_loss, 2)
+
+
+def calc_max_drawdown(equity_curve):
+    peak = -1e18
+    max_dd = 0.0
+    for p in equity_curve:
+        equity = p["equity"]
+        if equity > peak:
+            peak = equity
+        dd = (peak - equity) / peak if peak > 0 else 0
+        if dd > max_dd:
+            max_dd = dd
+    return round(max_dd * 100, 2)
+
+
 def run_backtest(strategy):
     symbol = strategy["meta"]["symbols"][0]
     timeframe = strategy["meta"]["timeframe"]
@@ -23,8 +52,8 @@ def run_backtest(strategy):
     slow_len = strategy["indicators"]["emaSlow"]["length"]
 
     # ===== COST CONFIG (2B) =====
-    fee_rate = strategy.get("costs", {}).get("fee", 0.0004)       # 0.04% mỗi side
-    slippage = strategy.get("costs", {}).get("slippage", 0.0001) # 0.01% mỗi side
+    fee_rate = strategy.get("costs", {}).get("fee", 0.0004)
+    slippage = strategy.get("costs", {}).get("slippage", 0.0001)
 
     df = load_csv(symbol, timeframe)
 
@@ -49,9 +78,8 @@ def run_backtest(strategy):
         time = str(row["time"])
         price = float(row["close"])
 
-        # ===== WARMUP =====
         if i < warmup:
-            equity_curve.append({"time": time, "equity": equity})
+            equity_curve.append({"time": time, "equity": round(equity, 6)})
             continue
 
         prev = df.iloc[i - 1]
@@ -59,12 +87,8 @@ def run_backtest(strategy):
         # ===== EXIT (LONG) =====
         if in_position:
             if crossed_down(prev["emaFast"], prev["emaSlow"], row["emaFast"], row["emaSlow"]):
-                # apply slippage on exit (worse price)
                 exit_price = price * (1 - slippage)
-
                 gross_pnl = exit_price - current_trade["entry_price"]
-
-                # fee on exit
                 exit_fee = exit_price * fee_rate
                 pnl = gross_pnl - exit_fee
 
@@ -76,19 +100,14 @@ def run_backtest(strategy):
                 current_trade["pnl"] = round(pnl, 6)
 
                 trades.append(current_trade)
-
                 current_trade = None
                 in_position = False
 
         # ===== ENTRY (LONG) =====
         if not in_position:
             if crossed_up(prev["emaFast"], prev["emaSlow"], row["emaFast"], row["emaSlow"]):
-                # apply slippage on entry (worse price)
                 entry_price = price * (1 + slippage)
-
-                # fee on entry
                 entry_fee = entry_price * fee_rate
-
                 equity -= entry_fee
 
                 current_trade = {
@@ -99,16 +118,22 @@ def run_backtest(strategy):
                 }
                 in_position = True
 
-        # ===== EQUITY CURVE =====
         equity_curve.append({"time": time, "equity": round(equity, 6)})
 
-    # ===== SUMMARY (tạm) =====
+    # ===== METRICS (2C) =====
+    winrate = calc_winrate(trades)
+    profit_factor = calc_profit_factor(trades)
+    max_dd = calc_max_drawdown(equity_curve)
+
     result = {
         "summary": {
             "initialEquity": initial_equity,
             "finalEquity": round(equity, 6),
             "netProfit": round(equity - initial_equity, 6),
-            "totalTrades": len(trades)
+            "totalTrades": len(trades),
+            "winrate": winrate,
+            "profitFactor": profit_factor,
+            "maxDrawdownPct": max_dd
         },
         "equityCurve": equity_curve,
         "trades": trades
