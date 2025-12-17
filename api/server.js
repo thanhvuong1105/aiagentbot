@@ -48,34 +48,56 @@ app.post("/run-backtest", (req, res) => {
     return res.status(400).json({ error: "strategy is required" });
   }
 
-  const python = spawn("python3", ["engine/backtest_engine.py"]);
+  const python = spawn("python3", ["engine/backtest_engine.py"], {
+    stdio: ["pipe", "pipe", "pipe"],
+  });
 
-  let output = "";
-  let errorOutput = "";
+  let stdout = "";
+  let stderr = "";
 
-  python.stdout.on("data", (d) => (output += d.toString()));
-  python.stderr.on("data", (d) => (errorOutput += d.toString()));
+  python.stdout.on("data", (chunk) => {
+    stdout += chunk.toString();
+  });
+
+  python.stderr.on("data", (chunk) => {
+    stderr += chunk.toString();
+  });
 
   python.on("close", (code) => {
     if (code !== 0) {
+      console.error("Python stderr:", stderr);
       return res.status(500).json({
         error: "Python backtest failed",
-        detail: errorOutput,
+        detail: stderr,
       });
     }
 
     try {
-      res.json({ success: true, result: JSON.parse(output) });
-    } catch {
-      res.status(500).json({ error: "Invalid JSON from Python", raw: output });
+      const parsed = JSON.parse(stdout.trim());
+
+      // 🔍 DEBUG QUAN TRỌNG
+      console.log("BACKTEST RESULT KEYS:", Object.keys(parsed));
+      console.log("SUMMARY:", parsed.summary);
+
+      return res.json({
+        success: true,
+        result: parsed, // ⬅️ TRẢ NGUYÊN KHỐI
+      });
+    } catch (err) {
+      console.error("Raw python output:", stdout);
+      return res.status(500).json({
+        error: "Invalid JSON from Python",
+        raw: stdout,
+      });
     }
   });
 
+  // gửi strategy sang Python
   python.stdin.write(JSON.stringify(strategy));
   python.stdin.end();
 });
 
-// ===== START SERVER (DUY NHẤT 1 LẦN) =====
+// ===== START SERVER =====
 app.listen(PORT, () => {
   console.log(`API running on port ${PORT}`);
 });
