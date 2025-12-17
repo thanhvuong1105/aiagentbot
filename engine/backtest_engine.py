@@ -147,3 +147,4 @@ if __name__ == "__main__":
     strategy = json.loads(raw)
     result = run_backtest(strategy)
     print(json.dumps(result))
+# LEVEL_2C_CONFIRMED
