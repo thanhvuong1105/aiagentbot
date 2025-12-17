@@ -22,6 +22,10 @@ def run_backtest(strategy):
     fast_len = strategy["indicators"]["emaFast"]["length"]
     slow_len = strategy["indicators"]["emaSlow"]["length"]
 
+    # ===== COST CONFIG (2B) =====
+    fee_rate = strategy.get("costs", {}).get("fee", 0.0004)       # 0.04% mỗi side
+    slippage = strategy.get("costs", {}).get("slippage", 0.0001) # 0.01% mỗi side
+
     df = load_csv(symbol, timeframe)
 
     df["emaFast"] = ema(df["close"], fast_len)
@@ -43,32 +47,33 @@ def run_backtest(strategy):
     for i in range(len(df)):
         row = df.iloc[i]
         time = str(row["time"])
-        price = row["close"]
+        price = float(row["close"])
 
         # ===== WARMUP =====
         if i < warmup:
-            equity_curve.append({
-                "time": time,
-                "equity": equity
-            })
+            equity_curve.append({"time": time, "equity": equity})
             continue
 
         prev = df.iloc[i - 1]
 
         # ===== EXIT (LONG) =====
         if in_position:
-            if crossed_down(
-                prev["emaFast"], prev["emaSlow"],
-                row["emaFast"], row["emaSlow"]
-            ):
-                exit_price = price
-                pnl = exit_price - current_trade["entry_price"]
+            if crossed_down(prev["emaFast"], prev["emaSlow"], row["emaFast"], row["emaSlow"]):
+                # apply slippage on exit (worse price)
+                exit_price = price * (1 - slippage)
+
+                gross_pnl = exit_price - current_trade["entry_price"]
+
+                # fee on exit
+                exit_fee = exit_price * fee_rate
+                pnl = gross_pnl - exit_fee
 
                 equity += pnl
 
                 current_trade["exit_time"] = time
-                current_trade["exit_price"] = exit_price
-                current_trade["pnl"] = pnl
+                current_trade["exit_price"] = round(exit_price, 6)
+                current_trade["exit_fee"] = round(exit_fee, 6)
+                current_trade["pnl"] = round(pnl, 6)
 
                 trades.append(current_trade)
 
@@ -77,29 +82,32 @@ def run_backtest(strategy):
 
         # ===== ENTRY (LONG) =====
         if not in_position:
-            if crossed_up(
-                prev["emaFast"], prev["emaSlow"],
-                row["emaFast"], row["emaSlow"]
-            ):
+            if crossed_up(prev["emaFast"], prev["emaSlow"], row["emaFast"], row["emaSlow"]):
+                # apply slippage on entry (worse price)
+                entry_price = price * (1 + slippage)
+
+                # fee on entry
+                entry_fee = entry_price * fee_rate
+
+                equity -= entry_fee
+
                 current_trade = {
                     "side": "Long",
                     "entry_time": time,
-                    "entry_price": price
+                    "entry_price": round(entry_price, 6),
+                    "entry_fee": round(entry_fee, 6)
                 }
                 in_position = True
 
         # ===== EQUITY CURVE =====
-        equity_curve.append({
-            "time": time,
-            "equity": equity
-        })
+        equity_curve.append({"time": time, "equity": round(equity, 6)})
 
-    # ===== SUMMARY (TẠM THỜI) =====
+    # ===== SUMMARY (tạm) =====
     result = {
         "summary": {
             "initialEquity": initial_equity,
-            "finalEquity": equity,
-            "netProfit": equity - initial_equity,
+            "finalEquity": round(equity, 6),
+            "netProfit": round(equity - initial_equity, 6),
             "totalTrades": len(trades)
         },
         "equityCurve": equity_curve,
