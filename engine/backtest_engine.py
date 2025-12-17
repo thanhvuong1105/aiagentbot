@@ -6,8 +6,10 @@ import pandas as pd
 from data_loader import load_csv
 from indicators import ema
 
+
 def crossed_up(prev_fast, prev_slow, fast, slow):
     return prev_fast <= prev_slow and fast > slow
+
 
 def crossed_down(prev_fast, prev_slow, fast, slow):
     return prev_fast >= prev_slow and fast < slow
@@ -25,9 +27,13 @@ def run_backtest(strategy):
     df["emaFast"] = ema(df["close"], fast_len)
     df["emaSlow"] = ema(df["close"], slow_len)
 
-    equity = 10000.0
-    position = False
-    entry_price = 0.0
+    # ===== ACCOUNT =====
+    initial_equity = 10000.0
+    equity = initial_equity
+
+    # ===== STATE =====
+    in_position = False
+    current_trade = None
 
     trades = []
     equity_curve = []
@@ -36,45 +42,71 @@ def run_backtest(strategy):
 
     for i in range(len(df)):
         row = df.iloc[i]
+        time = str(row["time"])
+        price = row["close"]
 
+        # ===== WARMUP =====
         if i < warmup:
-            equity_curve.append({"time": str(row["time"]), "equity": equity})
+            equity_curve.append({
+                "time": time,
+                "equity": equity
+            })
             continue
 
         prev = df.iloc[i - 1]
-        price = row["close"]
 
-        # ===== EXIT =====
-        if position:
-            if crossed_down(prev["emaFast"], prev["emaSlow"], row["emaFast"], row["emaSlow"]):
-                pnl = price - entry_price
+        # ===== EXIT (LONG) =====
+        if in_position:
+            if crossed_down(
+                prev["emaFast"], prev["emaSlow"],
+                row["emaFast"], row["emaSlow"]
+            ):
+                exit_price = price
+                pnl = exit_price - current_trade["entry_price"]
+
                 equity += pnl
 
-                trades.append({
-                    "side": "long",
-                    "entry": entry_price,
-                    "exit": price,
-                    "pnl": pnl
-                })
+                current_trade["exit_time"] = time
+                current_trade["exit_price"] = exit_price
+                current_trade["pnl"] = pnl
 
-                position = False
+                trades.append(current_trade)
 
-        # ===== ENTRY =====
-        if not position:
-            if crossed_up(prev["emaFast"], prev["emaSlow"], row["emaFast"], row["emaSlow"]):
-                position = True
-                entry_price = price
+                current_trade = None
+                in_position = False
 
-        equity_curve.append({"time": str(row["time"]), "equity": equity})
+        # ===== ENTRY (LONG) =====
+        if not in_position:
+            if crossed_up(
+                prev["emaFast"], prev["emaSlow"],
+                row["emaFast"], row["emaSlow"]
+            ):
+                current_trade = {
+                    "side": "Long",
+                    "entry_time": time,
+                    "entry_price": price
+                }
+                in_position = True
 
-    return {
+        # ===== EQUITY CURVE =====
+        equity_curve.append({
+            "time": time,
+            "equity": equity
+        })
+
+    # ===== SUMMARY (TẠM THỜI) =====
+    result = {
         "summary": {
-            "netProfit": equity - 10000,
+            "initialEquity": initial_equity,
+            "finalEquity": equity,
+            "netProfit": equity - initial_equity,
             "totalTrades": len(trades)
         },
         "equityCurve": equity_curve,
         "trades": trades
     }
+
+    return result
 
 
 if __name__ == "__main__":
